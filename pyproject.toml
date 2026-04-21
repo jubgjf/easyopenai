@@ -6,7 +6,10 @@ readme = "README.md"
 authors = [
     { name = "jubgjf", email = "guanjiannan@outlook.com" }
 ]
+license = "MIT"
+license-files = ["LICENSE"]
 requires-python = ">=3.12"
+keywords = ["openai", "llm", "async", "multi-provider", "reasoning"]
 dependencies = [
     "aiolimiter>=1.2.1",
     "loguru>=0.7.3",
@@ -17,8 +20,9 @@ dependencies = [
     "tenacity>=9.1.4",
 ]
 
-[project.scripts]
-easyopenai = "easyopenai:main"
+[project.urls]
+Homepage = "https://github.com/jubgjf/easyopenai"
+Repository = "https://github.com/jubgjf/easyopenai"
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
