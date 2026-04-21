@@ -1,0 +1,36 @@
+logging:
+  stats_interval_s: 30
+scheduler:
+  max_retries_per_task: 3
+providers:
+  - name: bltcy
+    base_url: https://api.bltcy.ai/v1
+    api_key: ${BLTCY_API_KEY}
+    max_concurrency: 4
+    max_rpm: 60
+    force_stream: true        # 用 qwen3-8b 时只支持流式
+    health:
+      window_size: 20
+      failure_threshold: 0.5
+      cooldown_s: 30
+    models:
+      - name: qwen3-8b
+        is_reasoning: true
+      - name: deepseek-r1
+        is_reasoning: true
+
+  - name: yunwu
+    base_url: https://yunwu.ai/v1
+    api_key: ${YUNWU_API_KEY}
+    max_concurrency: 4
+    max_rpm: 60
+    force_stream: false
+    health:
+      window_size: 20
+      failure_threshold: 0.5
+      cooldown_s: 30
+    models:
+      - name: qwen3-8b
+        is_reasoning: true
+      - name: deepseek-r1
+        is_reasoning: true
