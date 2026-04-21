@@ -14,8 +14,36 @@
 
 ## 安装
 
+### 作为依赖使用
+
 ```bash
-git clone <this-repo>
+# uv (推荐)
+uv add "git+https://github.com/jubgjf/easyopenai.git"
+
+# pip
+pip install "git+https://github.com/jubgjf/easyopenai.git"
+```
+
+在 `pyproject.toml` 里声明：
+
+```toml
+dependencies = [
+    "easyopenai @ git+https://github.com/jubgjf/easyopenai.git",
+]
+```
+
+锁定到某个 tag / commit（打了 tag 之后推荐）：
+
+```bash
+uv add "git+https://github.com/jubgjf/easyopenai.git@v0.1.0"
+```
+
+私有仓库同样用 https:// 形式，由本地 git 凭据（credential helper / SSH agent / PAT）解决授权，无需在命令里带 token。
+
+### 本地开发
+
+```bash
+git clone https://github.com/jubgjf/easyopenai.git
 cd easyopenai
 uv sync
 ```

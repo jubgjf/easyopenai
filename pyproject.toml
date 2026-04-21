@@ -22,7 +22,7 @@ dependencies = [
 
 [project.urls]
 Homepage = "https://github.com/jubgjf/easyopenai"
-Repository = "https://github.com/jubgjf/easyopenai"
+Repository = "https://github.com/jubgjf/easyopenai.git"
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
