@@ -1,4 +1,5 @@
 """Periodic provider statistics logger."""
+
 from __future__ import annotations
 
 import asyncio
@@ -21,12 +22,9 @@ async def stats_printer(providers: list[Provider], interval_s: float) -> None:
             last_totals[p.name] = (s.requests_total, s.prompt_tokens, s.completion_tokens)
             rpm = d_req / interval_s * 60
             tpm = (d_prompt + d_comp) / interval_s * 60
-            success_rate = (
-                s.requests_success / s.requests_total * 100 if s.requests_total else 0.0
-            )
+            success_rate = s.requests_success / s.requests_total * 100 if s.requests_total else 0.0
             logger.info(
-                "[stats:{}] state={} inflight={} rpm={:.0f} tpm={:.0f} "
-                "success={:.0f}% total={} fail={}",
+                "[stats:{}] state={} inflight={} rpm={:.0f} tpm={:.0f} success={:.0f}% total={} fail={}",
                 p.name,
                 p.health.state.value,
                 s.inflight,

@@ -4,6 +4,7 @@ All modules should `from loguru import logger` directly; this module's
 `setup_logging()` function configures sinks, formatters, and key-masking
 filters once at application startup.
 """
+
 from __future__ import annotations
 
 import re

@@ -3,6 +3,7 @@
 State machine: CLOSED -> OPEN (after threshold breach) -> HALF_OPEN (after cooldown)
 -> CLOSED (on success probe) | OPEN (on failure probe).
 """
+
 from __future__ import annotations
 
 import time

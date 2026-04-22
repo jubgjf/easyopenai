@@ -1,6 +1,5 @@
 import time
 
-import pytest
 
 from easyopenai.config import HealthConfig
 from easyopenai.health import HealthMonitor, State

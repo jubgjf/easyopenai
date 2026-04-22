@@ -3,6 +3,7 @@ and verify the scheduler's failover, circuit breaker, and exhaustion paths.
 
 No real API calls here — these tests must run offline.
 """
+
 from __future__ import annotations
 
 import httpx
@@ -97,9 +98,7 @@ async def test_failover_routes_to_healthy_provider(mock_routes):
     cfg = _make_config()
     results = []
     async with Client(config=cfg) as client:
-        async for r in client.stream(
-            [Task(task_id="t1", messages=[{"role": "user", "content": "hi"}], model="m1")]
-        ):
+        async for r in client.stream([Task(task_id="t1", messages=[{"role": "user", "content": "hi"}], model="m1")]):
             results.append(r)
 
     assert len(results) == 1
@@ -121,9 +120,7 @@ async def test_all_providers_fail_returns_error_result(mock_routes):
     cfg = _make_config()
     results = []
     async with Client(config=cfg) as client:
-        async for r in client.stream(
-            [Task(task_id="doomed", messages=[{"role": "user", "content": "x"}], model="m1")]
-        ):
+        async for r in client.stream([Task(task_id="doomed", messages=[{"role": "user", "content": "x"}], model="m1")]):
             results.append(r)
 
     assert len(results) == 1
@@ -150,10 +147,7 @@ async def test_circuit_breaker_opens_and_skips_provider(mock_routes):
     async with Client(config=cfg) as client:
         # Fire 6 tasks; after the first couple of failures on 'bad', its health
         # should flip to OPEN and later tasks skip it.
-        tasks = [
-            Task(task_id=f"t{i}", messages=[{"role": "user", "content": "x"}], model="m1")
-            for i in range(6)
-        ]
+        tasks = [Task(task_id=f"t{i}", messages=[{"role": "user", "content": "x"}], model="m1") for i in range(6)]
         async for r in client.stream(tasks):
             results.append(r)
 
@@ -189,9 +183,7 @@ async def test_tenacity_retries_transient_5xx_within_provider(mock_routes):
 
     results = []
     async with Client(config=cfg) as client:
-        async for r in client.stream(
-            [Task(task_id="retry", messages=[{"role": "user", "content": "hi"}], model="m1")]
-        ):
+        async for r in client.stream([Task(task_id="retry", messages=[{"role": "user", "content": "hi"}], model="m1")]):
             results.append(r)
 
     assert len(results) == 1

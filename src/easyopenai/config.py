@@ -1,11 +1,8 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Iterator
-from dataclasses import dataclass, field
-from enum import Enum
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import yaml
 from dotenv import load_dotenv
@@ -71,6 +68,7 @@ class ProviderConfig(BaseModel):
 
 class SchedulerConfig(BaseModel):
     max_retries_per_task: int = 3
+    dispatch_policy: Literal["greedy", "round_robin"] = "greedy"
 
 
 class LoggingConfig(BaseModel):

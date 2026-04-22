@@ -9,6 +9,7 @@ Handles three wire-format variants we've observed:
 For reasoning models where none of these yield anything, we fail fast with
 an assertion — per user requirement in README.md.
 """
+
 from __future__ import annotations
 
 import re

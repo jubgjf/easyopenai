@@ -4,7 +4,7 @@ Runs only when both BLTCY_API_KEY and YUNWU_API_KEY env vars are present.
 Sends 4 small tasks (one per provider × model combo) — keep this minimal,
 real API calls cost money.
 """
-import asyncio
+
 import os
 import textwrap
 from pathlib import Path

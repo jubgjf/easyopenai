@@ -1,5 +1,3 @@
-import pytest
-
 from easyopenai.stream import aggregate_stream
 
 

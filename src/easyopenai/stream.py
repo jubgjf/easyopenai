@@ -3,6 +3,7 @@
 Works with ``openai.AsyncStream[ChatCompletionChunk]`` and any async iterable
 that yields objects/dicts with the same structure.
 """
+
 from __future__ import annotations
 
 import io
@@ -51,7 +52,9 @@ async def aggregate_stream(stream: AsyncIterator[Any]) -> dict:
             usage = (
                 chunk_usage
                 if isinstance(chunk_usage, dict)
-                else chunk_usage.model_dump() if hasattr(chunk_usage, "model_dump") else dict(chunk_usage)
+                else chunk_usage.model_dump()
+                if hasattr(chunk_usage, "model_dump")
+                else dict(chunk_usage)
             )
 
     reasoning_text = reasoning_buf.getvalue()

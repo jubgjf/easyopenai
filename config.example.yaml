@@ -2,6 +2,7 @@ logging:
   stats_interval_s: 30
 scheduler:
   max_retries_per_task: 3
+  dispatch_policy: greedy   # greedy | round_robin
 providers:
   - name: bltcy
     base_url: https://api.bltcy.ai/v1

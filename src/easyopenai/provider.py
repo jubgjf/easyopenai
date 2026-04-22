@@ -1,5 +1,6 @@
 """Provider abstraction: wraps AsyncOpenAI, applies rate limiting, retries,
 health tracking, stream aggregation, and reasoning parsing."""
+
 from __future__ import annotations
 
 import asyncio
@@ -92,8 +93,7 @@ class Provider:
                 @retry(
                     stop=stop_after_attempt(3),
                     wait=wait_random_exponential(min=1, max=10),
-                    retry=retry_if_exception_type(_RETRYABLE)
-                    | retry_if_exception_type(APIStatusError),
+                    retry=retry_if_exception_type(_RETRYABLE) | retry_if_exception_type(APIStatusError),
                     reraise=True,
                 )
                 async def _do() -> dict:
@@ -109,9 +109,7 @@ class Provider:
                     raise
 
                 choice = response["choices"][0]
-                reasoning, answer = parse_message(
-                    choice["message"], is_reasoning=model_info.is_reasoning
-                )
+                reasoning, answer = parse_message(choice["message"], is_reasoning=model_info.is_reasoning)
                 usage_raw = response.get("usage") or {}
                 usage = self._parse_usage(usage_raw, reasoning_text=reasoning, answer_text=answer)
 

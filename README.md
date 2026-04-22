@@ -32,13 +32,11 @@ dependencies = [
 ]
 ```
 
-锁定到某个 tag / commit（打了 tag 之后推荐）：
+锁定到某个 tag / commit：
 
 ```bash
-uv add "git+https://github.com/jubgjf/easyopenai.git@v0.1.0"
+uv add "git+https://github.com/jubgjf/easyopenai.git@v0.1.1"
 ```
-
-私有仓库同样用 https:// 形式，由本地 git 凭据（credential helper / SSH agent / PAT）解决授权，无需在命令里带 token。
 
 ### 本地开发
 
@@ -67,6 +65,8 @@ logging:
   stats_interval_s: 30        # 每 30 秒打印 provider 吞吐统计
 scheduler:
   max_retries_per_task: 3     # 一个任务最多被多少 provider 尝试
+  dispatch_policy: round_robin  # greedy(默认): 谁空闲谁接, 吞吐优先
+                                # round_robin: 轮流分发, 各 provider 均匀扣费
 providers:
   - name: bltcy
     base_url: https://api.bltcy.ai/v1
@@ -96,6 +96,11 @@ providers:
 ```
 
 **工作方式**：每个 provider 启动 `max_concurrency` 个 worker 从共享队列拉任务，只处理自己支持且未尝试过的任务。任务在一个 provider 上失败时，自动重排到**还没尝试过**的其他 provider；全部 provider 都失败才返回带 `error` 字段的 `Result`。频繁失败的 provider 会被熔断跳过，冷却后自动探测恢复。
+
+**调度策略 `scheduler.dispatch_policy`**：
+
+- `greedy`（默认）：所有 worker 抢一个共享队列。延迟最低、吞吐最高，但 provider 列表里靠前的会被优先打满 —— 第一个 provider 没占满 `max_concurrency` 之前，后面的几乎拿不到任务。
+- `round_robin`：dispatcher 协程把任务按顺序轮流派给各 provider 的私有队列。各家请求量均衡，适合**多 API 平台均匀扣费、规避单家突发风控**等场景。代价是有 ~5% 左右的吞吐折损（多了一层调度），实测可忽略。
 
 **3. 完整示例：库的所有公开用法**
 

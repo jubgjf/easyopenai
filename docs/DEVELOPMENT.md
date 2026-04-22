@@ -37,29 +37,36 @@ tests/
 
 ## 请求生命周期
 
+调度策略由 `scheduler.dispatch_policy` 决定：
+
+### greedy（默认）
+
 ```
 Client.stream(tasks)
-  └─ 每次调用 new 一个 Scheduler
-      └─ 为每个 Provider 起 max_concurrency 个 worker 协程
+  └─ Scheduler(task_q, result_q)
+      └─ 为每个 Provider 起 max_concurrency 个 worker，全部从 task_q 抢
          worker 循环:
            task = await task_q.get()
-           if not provider.supports(task.model)
-              or provider.name in task.attempted_providers
-              or not provider.health.can_serve():
-               await task_q.put(task); sleep(0.05); continue
-           task.attempted_providers.add(provider.name)
-           try:
-               result = await provider.call(task)     # 内部: aiolimiter → tenacity → (stream?) → parser
-               result_q.put(result)
-           except ProviderError:
-               untried = [p for p in providers if p.supports(model) and p.name not in attempted]
-               if untried and retry_count <= max_retries_per_task:
-                   task_q.put(task)                    # 回流
-               else:
-                   result_q.put(Result(error=...))    # 彻底失败
+           if not eligible: task_q.put(task); continue
+           result = await provider.call(task)
+           result_q.put(result)
 ```
 
-`Client.stream` 是异步生成器，按完成顺序 yield `Result`，总数等于输入任务数（失败也会产出一条带 `error` 的）。
+### round_robin
+
+```
+Client.stream(tasks)
+  └─ Scheduler(task_q, result_q, per-provider private_q)
+      ├─ dispatcher 协程: 从 task_q 取 → round-robin 分到 private_q[provider]
+      └─ 每个 Provider 起 max_concurrency 个 worker，从自己的 private_q 取
+         worker 循环:
+           task = await private_q.get()
+           if not eligible: task_q.put(task); continue  # 回共享队列让 dispatcher 重选
+           result = await provider.call(task)
+           result_q.put(result)
+```
+
+失败重试回流在两种策略下一致：`ProviderError` 后塞回 `task_q`，由 dispatcher（round_robin）或其他 worker（greedy）重新路由。
 
 ## 关键不变量（改代码前务必理解）
 
@@ -73,7 +80,7 @@ Client.stream(tasks)
    - `CLOSED → OPEN`：窗口填满且失败率 ≥ 阈值
    - `OPEN → HALF_OPEN`：`can_serve()` 检查 cooldown 到期，同时**立即**把 `_half_open_in_flight = True`（只放行 1 个探测）
    - `HALF_OPEN → CLOSED / OPEN`：下一次 `record()` 根据成败决定；记得清 `_half_open_in_flight`
-   
+
    这里 in-flight 标志位置曾经出过 bug（见 `test_half_open_after_cooldown_and_recover`），改时多跑单测。
 
 5. **token 会计**：`reasoning_tokens` 来自 `usage.completion_tokens_details.reasoning_tokens`（两家 provider 都是这个字段，见 `example.txt` 参考响应），`answer_tokens = completion_tokens - reasoning_tokens`，下限 clamp 到 0。

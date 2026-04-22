@@ -1,4 +1,5 @@
 """User-facing Client — the library's single public entrypoint."""
+
 from __future__ import annotations
 
 import asyncio
@@ -23,18 +24,14 @@ class Client:
         log_level: str = "INFO",
     ):
         setup_logging(level=log_level)
-        assert (config_path is None) != (config is None), (
-            "Pass exactly one of config_path / config"
-        )
+        assert (config_path is None) != (config is None), "Pass exactly one of config_path / config"
         self.cfg: AppConfig = config or load_config(config_path)  # type: ignore[arg-type]
         self.providers: list[Provider] = [Provider(pc) for pc in self.cfg.providers]
         self._stats_task: asyncio.Task | None = None
 
-    async def __aenter__(self) -> "Client":
+    async def __aenter__(self) -> Client:
         await self._ping_all()
-        self._stats_task = asyncio.create_task(
-            stats_printer(self.providers, self.cfg.logging.stats_interval_s)
-        )
+        self._stats_task = asyncio.create_task(stats_printer(self.providers, self.cfg.logging.stats_interval_s))
         return self
 
     async def __aexit__(self, exc_type, exc, tb) -> None:
@@ -81,6 +78,7 @@ class Client:
 
     def chat(self, messages: list[dict], model: str, **kw) -> Result:
         """Synchronous convenience wrapper — spins up its own event loop."""
+
         async def _run() -> Result:
             async with self as c:
                 return await c.achat(messages, model, **kw)
