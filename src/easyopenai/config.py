@@ -47,6 +47,9 @@ def mask_key(key: str) -> str:
 class ModelConfig(BaseModel):
     name: str
     is_reasoning: bool = False
+    force_stream: bool | None = None
+    max_concurrency: int | None = None
+    max_rpm: int | None = None
 
 
 class HealthConfig(BaseModel):

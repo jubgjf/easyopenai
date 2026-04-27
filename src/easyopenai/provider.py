@@ -55,11 +55,32 @@ class Provider:
         self.cfg = cfg
         self.name = cfg.name
         self.client = AsyncOpenAI(base_url=cfg.base_url, api_key=cfg.api_key)
-        self.limiter = AsyncLimiter(cfg.max_rpm, 60)
-        self.semaphore = asyncio.Semaphore(cfg.max_concurrency)
+        # Provider-level defaults used when model doesn't override.
+        self._default_limiter = AsyncLimiter(cfg.max_rpm, 60)
+        self._default_semaphore = asyncio.Semaphore(cfg.max_concurrency)
         self.health = HealthMonitor(cfg.health)
         self.stats = ProviderStats()
         self._models = {m.name: m for m in cfg.models}
+        # Per-model semaphore/limiter — only created when model overrides.
+        self._model_semaphores: dict[str, asyncio.Semaphore] = {}
+        self._model_limiters: dict[str, AsyncLimiter] = {}
+        for m in cfg.models:
+            if m.max_concurrency is not None:
+                self._model_semaphores[m.name] = asyncio.Semaphore(m.max_concurrency)
+            if m.max_rpm is not None:
+                self._model_limiters[m.name] = AsyncLimiter(m.max_rpm, 60)
+
+    def _semaphore_for(self, model: str) -> asyncio.Semaphore:
+        return self._model_semaphores.get(model, self._default_semaphore)
+
+    def _limiter_for(self, model: str) -> AsyncLimiter:
+        return self._model_limiters.get(model, self._default_limiter)
+
+    def _force_stream_for(self, model: str) -> bool:
+        m = self._models[model]
+        if m.force_stream is not None:
+            return m.force_stream
+        return self.cfg.force_stream
 
     def supports(self, model: str) -> bool:
         return model in self._models
@@ -67,9 +88,10 @@ class Provider:
     def model_is_reasoning(self, model: str) -> bool:
         return self._models[model].is_reasoning
 
-    def has_capacity(self) -> bool:
+    def has_capacity(self, model: str | None = None) -> bool:
         """Best-effort check: are we below max_concurrency?"""
-        return self.semaphore._value > 0  # type: ignore[attr-defined]
+        sem = self._semaphore_for(model) if model else self._default_semaphore
+        return sem._value > 0  # type: ignore[attr-defined]
 
     async def ping(self) -> bool:
         try:
@@ -83,9 +105,11 @@ class Provider:
     async def call(self, task: Task) -> Result:
         assert self.supports(task.model), f"Provider {self.name} does not serve {task.model}"
         model_info = self._models[task.model]
+        semaphore = self._semaphore_for(task.model)
+        limiter = self._limiter_for(task.model)
         started = time.monotonic()
 
-        async with self.semaphore:
+        async with semaphore:
             self.stats.inflight += 1
             self.stats.requests_total += 1
             try:
@@ -97,7 +121,7 @@ class Provider:
                     reraise=True,
                 )
                 async def _do() -> dict:
-                    async with self.limiter:
+                    async with limiter:
                         return await self._single_call(task)
 
                 try:
@@ -146,7 +170,7 @@ class Provider:
             kwargs["max_tokens"] = task.max_tokens
         kwargs.update(task.extra)
 
-        if self.cfg.force_stream:
+        if self._force_stream_for(task.model):
             kwargs["stream"] = True
             # Ask for usage in final chunk where supported.
             kwargs.setdefault("stream_options", {"include_usage": True})

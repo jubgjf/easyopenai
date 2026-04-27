@@ -1,6 +1,6 @@
 [project]
 name = "easyopenai"
-version = "0.1.1"
+version = "0.1.2"
 description = "Async OpenAI-compatible client with multi-provider scheduling, rate limiting, retries, and reasoning-model support."
 readme = "README.md"
 authors = [

@@ -35,7 +35,7 @@ dependencies = [
 锁定到某个 tag / commit：
 
 ```bash
-uv add "git+https://github.com/jubgjf/easyopenai.git@v0.1.1"
+uv add "git+https://github.com/jubgjf/easyopenai.git@v0.1.2"
 ```
 
 ### 本地开发
@@ -71,9 +71,9 @@ providers:
   - name: bltcy
     base_url: https://api.bltcy.ai/v1
     api_key: ${BLTCY_API_KEY}      # 从环境变量解析
-    max_concurrency: 4              # 并发请求数
-    max_rpm: 60                     # 每分钟最大请求数
-    force_stream: true              # 该 provider 仅支持流式则设 true
+    max_concurrency: 4              # provider 级默认并发数
+    max_rpm: 60                     # provider 级默认 RPM
+    force_stream: true              # provider 级默认流式策略
     health:
       window_size: 20               # 滑动窗口大小
       failure_threshold: 0.5        # 失败率阈值，触发熔断
@@ -81,8 +81,12 @@ providers:
     models:
       - name: qwen3-8b
         is_reasoning: true          # 思考模型
+        # 未设 force_stream/max_concurrency/max_rpm → 继承 provider 级
       - name: deepseek-r1
         is_reasoning: true
+        force_stream: false         # 该模型覆盖为非流式
+        max_concurrency: 2          # 该模型独立并发上限
+        max_rpm: 30                 # 该模型独立 RPM
 
   - name: yunwu
     base_url: https://yunwu.ai/v1

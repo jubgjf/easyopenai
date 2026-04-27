@@ -64,3 +64,46 @@ def test_no_providers_fails(tmp_path):
     )
     with pytest.raises(Exception):
         load_config(cfg_path)
+
+
+def test_per_model_overrides(tmp_path, monkeypatch):
+    """Model-level force_stream / max_concurrency / max_rpm override provider defaults;
+    unset fields fall back to provider values."""
+    monkeypatch.setenv("K", "sk-abcdef1234567890")
+    cfg_path = write(
+        tmp_path,
+        "config.yaml",
+        """
+        providers:
+          - name: p1
+            base_url: https://x/v1
+            api_key: ${K}
+            max_concurrency: 8
+            max_rpm: 100
+            force_stream: true
+            models:
+              - name: m_default
+                is_reasoning: false
+              - name: m_override
+                is_reasoning: true
+                force_stream: false
+                max_concurrency: 2
+                max_rpm: 30
+        """,
+    )
+    cfg = load_config(cfg_path)
+    p = cfg.providers[0]
+    # Provider-level defaults
+    assert p.force_stream is True
+    assert p.max_concurrency == 8
+    assert p.max_rpm == 100
+    # Model without overrides — fields are None (Provider resolves at runtime)
+    m_def = next(m for m in p.models if m.name == "m_default")
+    assert m_def.force_stream is None
+    assert m_def.max_concurrency is None
+    assert m_def.max_rpm is None
+    # Model with overrides
+    m_ovr = next(m for m in p.models if m.name == "m_override")
+    assert m_ovr.force_stream is False
+    assert m_ovr.max_concurrency == 2
+    assert m_ovr.max_rpm == 30
