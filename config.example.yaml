@@ -39,3 +39,16 @@ providers:
         is_reasoning: true
       - name: deepseek-r1
         is_reasoning: true
+
+  - name: yibu
+    engine: hmwrangler            # 使用 hmwrangler 私有库作为后端
+    sub_account_name: acc0501     # hmwrangler 专用参数
+    max_concurrency: 4
+    max_rpm: 60
+    health:
+      window_size: 20
+      failure_threshold: 0.5
+      cooldown_s: 30
+    models:
+      - name: deepseek-v3.2
+        is_reasoning: false

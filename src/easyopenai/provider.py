@@ -1,11 +1,10 @@
-"""Provider abstraction: wraps AsyncOpenAI, applies rate limiting, retries,
-health tracking, stream aggregation, and reasoning parsing."""
+"""Provider abstraction: wraps a Backend, applies rate limiting, retries,
+health tracking, and reasoning parsing."""
 
 from __future__ import annotations
 
 import asyncio
 import time
-from typing import Any
 
 from aiolimiter import AsyncLimiter
 from loguru import logger
@@ -13,7 +12,6 @@ from openai import (
     APIConnectionError,
     APIStatusError,
     APITimeoutError,
-    AsyncOpenAI,
     RateLimitError,
 )
 from tenacity import (
@@ -23,10 +21,10 @@ from tenacity import (
     wait_random_exponential,
 )
 
+from easyopenai.backends import make_backend
 from easyopenai.config import ProviderConfig
 from easyopenai.health import HealthMonitor
 from easyopenai.parser import parse_message
-from easyopenai.stream import aggregate_stream
 from easyopenai.types import ProviderStats, Result, Task, TokenUsage
 
 _RETRYABLE = (
@@ -54,14 +52,12 @@ class Provider:
         assert cfg.max_rpm > 0
         self.cfg = cfg
         self.name = cfg.name
-        self.client = AsyncOpenAI(base_url=cfg.base_url, api_key=cfg.api_key)
-        # Provider-level defaults used when model doesn't override.
+        self._backend = make_backend(cfg)
         self._default_limiter = AsyncLimiter(cfg.max_rpm, 60)
         self._default_semaphore = asyncio.Semaphore(cfg.max_concurrency)
         self.health = HealthMonitor(cfg.health)
         self.stats = ProviderStats()
         self._models = {m.name: m for m in cfg.models}
-        # Per-model semaphore/limiter — only created when model overrides.
         self._model_semaphores: dict[str, asyncio.Semaphore] = {}
         self._model_limiters: dict[str, AsyncLimiter] = {}
         for m in cfg.models:
@@ -76,12 +72,6 @@ class Provider:
     def _limiter_for(self, model: str) -> AsyncLimiter:
         return self._model_limiters.get(model, self._default_limiter)
 
-    def _force_stream_for(self, model: str) -> bool:
-        m = self._models[model]
-        if m.force_stream is not None:
-            return m.force_stream
-        return self.cfg.force_stream
-
     def supports(self, model: str) -> bool:
         return model in self._models
 
@@ -89,15 +79,17 @@ class Provider:
         return self._models[model].is_reasoning
 
     def has_capacity(self, model: str | None = None) -> bool:
-        """Best-effort check: are we below max_concurrency?"""
         sem = self._semaphore_for(model) if model else self._default_semaphore
         return sem._value > 0  # type: ignore[attr-defined]
 
     async def ping(self) -> bool:
         try:
-            await self.client.models.list()
-            logger.info("[{}] ping OK", self.name)
-            return True
+            ok = await self._backend.ping()
+            if ok:
+                logger.info("[{}] ping OK", self.name)
+            else:
+                logger.warning("[{}] ping FAILED", self.name)
+            return ok
         except Exception as e:
             logger.warning("[{}] ping FAILED: {}", self.name, e)
             return False
@@ -122,12 +114,11 @@ class Provider:
                 )
                 async def _do() -> dict:
                     async with limiter:
-                        return await self._single_call(task)
+                        return await self._backend.call(task)
 
                 try:
                     response = await _do()
                 except APIStatusError as e:
-                    # Only 5xx should have been retried; re-raise 4xx without wrapping
                     if not _is_retryable_status(e):
                         raise
                     raise
@@ -159,26 +150,8 @@ class Provider:
             finally:
                 self.stats.inflight -= 1
 
-    async def _single_call(self, task: Task) -> dict:
-        kwargs: dict[str, Any] = {
-            "model": task.model,
-            "messages": task.messages,
-        }
-        if task.temperature is not None:
-            kwargs["temperature"] = task.temperature
-        if task.max_tokens is not None:
-            kwargs["max_tokens"] = task.max_tokens
-        kwargs.update(task.extra)
-
-        if self._force_stream_for(task.model):
-            kwargs["stream"] = True
-            # Ask for usage in final chunk where supported.
-            kwargs.setdefault("stream_options", {"include_usage": True})
-            stream = await self.client.chat.completions.create(**kwargs)
-            return await aggregate_stream(stream)
-        else:
-            resp = await self.client.chat.completions.create(**kwargs)
-            return resp.model_dump()
+    async def close(self) -> None:
+        await self._backend.close()
 
     @staticmethod
     def _parse_usage(raw: dict, reasoning_text: str, answer_text: str) -> TokenUsage:

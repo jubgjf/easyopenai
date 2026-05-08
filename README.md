@@ -35,7 +35,7 @@ dependencies = [
 锁定到某个 tag / commit：
 
 ```bash
-uv add "git+https://github.com/jubgjf/easyopenai.git@v0.1.2"
+uv add "git+https://github.com/jubgjf/easyopenai.git@v0.1.3"
 ```
 
 ### 本地开发

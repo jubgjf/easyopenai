@@ -7,7 +7,7 @@ from typing import Any, Literal
 import yaml
 from dotenv import load_dotenv
 from loguru import logger
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 import os
 
@@ -60,13 +60,26 @@ class HealthConfig(BaseModel):
 
 class ProviderConfig(BaseModel):
     name: str
-    base_url: str
-    api_key: str
+    engine: Literal["openai", "hmwrangler"] = "openai"
+    base_url: str | None = None
+    api_key: str | None = None
+    sub_account_name: str | None = None
     max_concurrency: int = 8
     max_rpm: int = 300
     force_stream: bool = False
     health: HealthConfig = Field(default_factory=HealthConfig)
     models: list[ModelConfig] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _validate_engine_fields(self):
+        if self.engine == "openai":
+            assert self.base_url is not None, f"Provider '{self.name}': engine=openai requires base_url"
+            assert self.api_key is not None, f"Provider '{self.name}': engine=openai requires api_key"
+        elif self.engine == "hmwrangler":
+            assert self.sub_account_name is not None, (
+                f"Provider '{self.name}': engine=hmwrangler requires sub_account_name"
+            )
+        return self
 
 
 class SchedulerConfig(BaseModel):
@@ -95,10 +108,11 @@ def load_config(path: str | Path, dotenv_path: str | Path | None = None) -> AppC
     for p in cfg.providers:
         assert len(p.models) > 0, f"Provider '{p.name}' must have at least one model"
         logger.info(
-            "Loaded provider '{}' base_url={} api_key={} models={}",
+            "Loaded provider '{}' engine={} base_url={} api_key={} models={}",
             p.name,
-            p.base_url,
-            mask_key(p.api_key),
+            p.engine,
+            p.base_url or "(none)",
+            mask_key(p.api_key) if p.api_key else "(none)",
             [m.name for m in p.models],
         )
     return cfg

@@ -42,7 +42,7 @@ class Client:
             except (asyncio.CancelledError, Exception):
                 pass
         for p in self.providers:
-            await p.client.close()
+            await p.close()
 
     async def _ping_all(self) -> None:
         results = await asyncio.gather(*(p.ping() for p in self.providers))
