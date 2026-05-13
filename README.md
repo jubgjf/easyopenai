@@ -46,7 +46,7 @@ cd easyopenai
 uv sync
 ```
 
-需要 Python 3.12+。
+需要 Python 3.10+。
 
 ## 快速开始
 

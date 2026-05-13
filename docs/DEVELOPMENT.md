@@ -4,7 +4,7 @@
 
 ## 技术栈与基本约定
 
-- Python 3.12，`uv` 管理依赖与构建
+- Python 3.10，`uv` 管理依赖与构建
 - `asyncio` 全程；`pytest-asyncio` 以 `auto` 模式运行（见 `pyproject.toml`），直接 `async def test_*` 即可
 - pydantic v2 做所有数据模型
 - **日志统一用 loguru**，禁用标准库 `logging`。入口统一走 `easyopenai.logging.setup_logging()`，它注入了一个正则过滤器自动 mask `sk-…` / `Bearer …`

@@ -72,7 +72,7 @@ Key invariants worth preserving:
 
 ## Conventions
 
-- Python 3.12, pydantic v2, asyncio throughout. `pytest-asyncio` runs in
+- Python 3.10, pydantic v2, asyncio throughout. `pytest-asyncio` runs in
   `auto` mode (set in `pyproject.toml`), so `async def test_*` works without
   decorators.
 - `assert` is used liberally for fail-fast invariants per the README. Don't
