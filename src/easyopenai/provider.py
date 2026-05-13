@@ -16,7 +16,7 @@ from openai import (
 )
 from tenacity import (
     retry,
-    retry_if_exception_type,
+    retry_if_exception,
     stop_after_attempt,
     wait_random_exponential,
 )
@@ -34,7 +34,7 @@ _RETRYABLE = (
 )
 
 
-def _is_retryable_status(exc: BaseException) -> bool:
+def _is_retryable(exc: BaseException) -> bool:
     if isinstance(exc, _RETRYABLE):
         return True
     if isinstance(exc, APIStatusError):
@@ -79,6 +79,7 @@ class Provider:
         return self._models[model].is_reasoning
 
     def has_capacity(self, model: str | None = None) -> bool:
+        """Best-effort check: are we below max_concurrency?"""
         sem = self._semaphore_for(model) if model else self._default_semaphore
         return sem._value > 0  # type: ignore[attr-defined]
 
@@ -109,24 +110,19 @@ class Provider:
                 @retry(
                     stop=stop_after_attempt(3),
                     wait=wait_random_exponential(min=1, max=10),
-                    retry=retry_if_exception_type(_RETRYABLE) | retry_if_exception_type(APIStatusError),
+                    retry=retry_if_exception(_is_retryable),
                     reraise=True,
                 )
                 async def _do() -> dict:
                     async with limiter:
                         return await self._backend.call(task)
 
-                try:
-                    response = await _do()
-                except APIStatusError as e:
-                    if not _is_retryable_status(e):
-                        raise
-                    raise
+                response = await _do()
 
                 choice = response["choices"][0]
                 reasoning, answer = parse_message(choice["message"], is_reasoning=model_info.is_reasoning)
                 usage_raw = response.get("usage") or {}
-                usage = self._parse_usage(usage_raw, reasoning_text=reasoning, answer_text=answer)
+                usage = self._parse_usage(usage_raw)
 
                 self.stats.requests_success += 1
                 self.stats.prompt_tokens += usage.prompt_tokens
@@ -142,6 +138,8 @@ class Provider:
                     usage=usage,
                     latency_s=time.monotonic() - started,
                 )
+            except AssertionError:
+                raise
             except Exception as e:
                 self.stats.requests_failed += 1
                 self.health.record(False)
@@ -154,7 +152,7 @@ class Provider:
         await self._backend.close()
 
     @staticmethod
-    def _parse_usage(raw: dict, reasoning_text: str, answer_text: str) -> TokenUsage:
+    def _parse_usage(raw: dict) -> TokenUsage:
         prompt = int(raw.get("prompt_tokens", 0) or 0)
         completion = int(raw.get("completion_tokens", 0) or 0)
         details = raw.get("completion_tokens_details") or {}

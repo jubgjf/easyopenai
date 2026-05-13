@@ -190,3 +190,24 @@ async def test_tenacity_retries_transient_5xx_within_provider(mock_routes):
     assert results[0].error is None
     assert results[0].answer_content == "third time's the charm"
     assert results[0].provider == "bad"
+
+
+async def test_4xx_not_retried(mock_routes):
+    """A 400 Bad Request must NOT be retried by tenacity — it should fail
+    immediately and route to the next provider."""
+    bad_route = mock_routes.post("https://bad.test/v1/chat/completions").mock(
+        return_value=httpx.Response(400, json={"error": {"message": "bad request", "type": "invalid_request_error"}})
+    )
+    mock_routes.post("https://good.test/v1/chat/completions").mock(
+        return_value=httpx.Response(200, json=_ok_response("ok from good"))
+    )
+
+    cfg = _make_config()
+    results = []
+    async with Client(config=cfg) as client:
+        async for r in client.stream([Task(task_id="t4xx", messages=[{"role": "user", "content": "hi"}], model="m1")]):
+            results.append(r)
+
+    assert len(results) == 1
+    # 400 should have been tried exactly once on 'bad', not retried
+    assert bad_route.call_count == 1

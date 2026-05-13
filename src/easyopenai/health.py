@@ -29,6 +29,7 @@ class HealthMonitor:
         self._state: State = State.CLOSED
         self._opened_at: float = 0.0
         self._half_open_in_flight: bool = False
+        self._probe_started_at: float = 0.0
 
     @property
     def state(self) -> State:
@@ -59,10 +60,17 @@ class HealthMonitor:
             if time.monotonic() - self._opened_at >= self._cfg.cooldown_s:
                 self._state = State.HALF_OPEN
                 self._half_open_in_flight = True
+                self._probe_started_at = time.monotonic()
                 return True
             return False
         # HALF_OPEN: only one probe at a time
-        if not self._half_open_in_flight:
-            self._half_open_in_flight = True
-            return True
-        return False
+        if self._half_open_in_flight:
+            # Probe timeout: if probe has been in-flight longer than cooldown_s,
+            # assume it was lost (e.g. worker cancelled) and allow a new probe.
+            if time.monotonic() - self._probe_started_at >= self._cfg.cooldown_s:
+                self._half_open_in_flight = False
+            else:
+                return False
+        self._half_open_in_flight = True
+        self._probe_started_at = time.monotonic()
+        return True

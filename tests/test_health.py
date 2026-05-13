@@ -47,3 +47,22 @@ def test_half_open_probe_failure_reopens():
     assert m.can_serve()
     m.record(False)
     assert m.state == State.OPEN
+
+
+def test_half_open_probe_timeout_resets_in_flight():
+    """If a HALF_OPEN probe is lost (no record() call), the in-flight flag
+    should auto-reset after cooldown_s so the provider isn't stuck forever."""
+    m = _mon()
+    for _ in range(4):
+        m.record(False)
+    assert m.state == State.OPEN
+    time.sleep(0.06)
+    # First probe enters HALF_OPEN
+    assert m.can_serve()
+    assert m.state == State.HALF_OPEN
+    # Simulate lost probe: no record() call, just wait for cooldown
+    assert not m.can_serve()  # still blocked
+    time.sleep(0.06)
+    # After cooldown_s, the stale in-flight should be cleared
+    assert m.can_serve()  # new probe allowed
+    assert m.state == State.HALF_OPEN
