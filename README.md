@@ -243,12 +243,31 @@ Result(task_id: str,
        model: str,
        reasoning_content: str,      # 思考内容（非 reasoning 模型为空串）
        answer_content: str,         # 最终回答
+       logprobs: dict | None,       # 原始 logprobs；未请求或后端未返回时为 None
        usage: TokenUsage,
        latency_s: float,
        error: str | None)           # None 表示成功
 
 result.ok  # == (error is None)
 ```
+
+请求 logprobs 时，直接通过 `extra` 透传 OpenAI 兼容参数：
+
+```python
+r = await client.achat(
+    messages=[{"role": "user", "content": "1+1="}],
+    model="qwen2.5-7b-instruct",
+    max_tokens=20,
+    logprobs=True,
+    top_logprobs=5,
+)
+print(r.logprobs["content"])
+```
+
+当 `logprobs=True` 时，easyopenai 会校验 `logprobs.content` 中的 token
+是否能重建返回文本，包括 `answer_content`、`reasoning_content`，以及常见的 `<think>`
+包装形态。如果后端没有返回 logprobs，或 token 与返回文本不匹配，本次 provider 调用会失败并进入
+现有重试 / 故障切换流程。思考模型的后端可能只对最终回答返回 logprobs，也可能覆盖 reasoning tokens。
 
 ### `TokenUsage`
 

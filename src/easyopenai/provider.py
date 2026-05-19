@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import asyncio
 import time
+from typing import Any
 
 from aiolimiter import AsyncLimiter
 from loguru import logger
@@ -44,6 +45,177 @@ def _is_retryable(exc: BaseException) -> bool:
 
 class ProviderError(Exception):
     pass
+
+
+_IGNORABLE_TRAILING_TOKENS = {
+    "",
+    "<|im_end|>",
+    "<|endoftext|>",
+    "<|eot_id|>",
+    "<|end|>",
+    "</s>",
+}
+
+
+def _get(obj: Any, key: str, default: Any = None) -> Any:
+    if obj is None:
+        return default
+    if isinstance(obj, dict):
+        return obj.get(key, default)
+    return getattr(obj, key, default)
+
+
+def _as_dict(obj: Any) -> dict[str, Any] | None:
+    if obj is None:
+        return None
+    if isinstance(obj, dict):
+        return obj
+    if hasattr(obj, "model_dump"):
+        return obj.model_dump()
+    return None
+
+
+def _logprobs_requested(task: Task) -> bool:
+    return task.extra.get("logprobs") is True
+
+
+def _decode_logprob_entry(entry: dict[str, Any]) -> str:
+    raw_bytes = entry.get("bytes")
+    if raw_bytes is not None:
+        try:
+            return bytes(raw_bytes).decode("utf-8")
+        except Exception as e:
+            raise ValueError(f"invalid logprobs bytes for token {entry.get('token')!r}: {raw_bytes!r}") from e
+
+    token = entry.get("token")
+    if token is None:
+        raise ValueError(f"logprobs content entry has neither bytes nor token: {entry!r}")
+    return str(token)
+
+
+def _is_ignorable_trailing_entry(entry: dict[str, Any], text: str) -> bool:
+    token = str(entry.get("token") or "")
+    return text in _IGNORABLE_TRAILING_TOKENS or token in _IGNORABLE_TRAILING_TOKENS
+
+
+def _trim_trailing_ignorable_entries(
+    entries: list[dict[str, Any]],
+    texts: list[str],
+) -> tuple[list[dict[str, Any]], list[str]]:
+    while entries and _is_ignorable_trailing_entry(entries[-1], texts[-1]):
+        entries = entries[:-1]
+        texts = texts[:-1]
+    return entries, texts
+
+
+def _logprobs_text_targets(message: Any, reasoning: str, answer: str) -> list[str]:
+    targets: list[str] = []
+
+    raw_content = _get(message, "content")
+    if isinstance(raw_content, str) and raw_content:
+        targets.append(raw_content)
+    if answer:
+        targets.append(answer)
+    if reasoning:
+        if answer:
+            targets.extend(
+                [
+                    reasoning + answer,
+                    f"{reasoning}\n{answer}",
+                    f"{reasoning}\n\n{answer}",
+                ]
+            )
+        targets.extend(
+            [
+                reasoning,
+                f"<think>\n{reasoning}",
+                f"<think>{reasoning}",
+            ]
+        )
+        if answer:
+            targets.extend(
+                [
+                    f"<think>\n{reasoning}\n</think>\n{answer}",
+                    f"<think>\n{reasoning}\n</think>\n\n{answer}",
+                    f"<think>{reasoning}</think>{answer}",
+                ]
+            )
+
+    unique_targets: list[str] = []
+    for target in targets:
+        if target not in unique_targets:
+            unique_targets.append(target)
+    return unique_targets
+
+
+def _reconstructed_text_variants(text: str) -> list[str]:
+    variants = [text]
+
+    if text.startswith("<think>"):
+        after_open = text[len("<think>") :]
+        variants.append(after_open.lstrip("\n"))
+
+        if "</think>" in after_open:
+            reasoning_part, answer_part = after_open.split("</think>", 1)
+            reasoning = reasoning_part.strip("\n")
+            answer = answer_part.lstrip("\n")
+            variants.extend(
+                [
+                    reasoning,
+                    answer,
+                    reasoning + answer,
+                    f"{reasoning}\n{answer}",
+                    f"{reasoning}\n\n{answer}",
+                ]
+            )
+
+    unique_variants: list[str] = []
+    for variant in variants:
+        if variant not in unique_variants:
+            unique_variants.append(variant)
+    return unique_variants
+
+
+def _validate_logprobs_match_text(
+    logprobs: dict[str, Any] | None,
+    message: Any,
+    reasoning: str,
+    answer: str,
+) -> None:
+    if logprobs is None:
+        raise ValueError("logprobs=True was requested but response choice.logprobs is missing")
+
+    content = logprobs.get("content")
+    if not isinstance(content, list):
+        raise ValueError("logprobs=True was requested but response choice.logprobs.content is missing")
+    targets = _logprobs_text_targets(message, reasoning, answer)
+    if not content and targets:
+        raise ValueError("logprobs.content is empty but response text is not empty")
+
+    entries: list[dict[str, Any]] = []
+    texts: list[str] = []
+
+    for raw_entry in content:
+        entry = _as_dict(raw_entry)
+        if entry is None:
+            raise ValueError(f"logprobs.content entry is not a mapping: {raw_entry!r}")
+        entries.append(entry)
+        texts.append(_decode_logprob_entry(entry))
+
+    _entries, texts = _trim_trailing_ignorable_entries(entries, texts)
+    reconstructed = "".join(texts)
+    for variant in _reconstructed_text_variants(reconstructed):
+        if variant in targets:
+            return
+
+    if not reconstructed and not targets:
+        return
+
+    target_preview = targets[0] if targets else ""
+    raise ValueError(
+        "logprobs.content does not reconstruct response text: "
+        f"got {reconstructed!r}, expected one of {len(targets)} target(s), first target {target_preview!r}"
+    )
 
 
 class Provider:
@@ -121,6 +293,9 @@ class Provider:
 
                 choice = response["choices"][0]
                 reasoning, answer = parse_message(choice["message"], is_reasoning=model_info.is_reasoning)
+                logprobs = _as_dict(_get(choice, "logprobs"))
+                if _logprobs_requested(task):
+                    _validate_logprobs_match_text(logprobs, choice["message"], reasoning, answer)
                 usage_raw = response.get("usage") or {}
                 usage = self._parse_usage(usage_raw)
 
@@ -135,6 +310,7 @@ class Provider:
                     model=task.model,
                     reasoning_content=reasoning,
                     answer_content=answer,
+                    logprobs=logprobs,
                     usage=usage,
                     latency_s=time.monotonic() - started,
                 )

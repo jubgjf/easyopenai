@@ -34,6 +34,7 @@ class Result(BaseModel):
     model: str
     reasoning_content: str = ""
     answer_content: str = ""
+    logprobs: dict[str, Any] | None = None
     usage: TokenUsage = Field(default_factory=TokenUsage)
     latency_s: float = 0.0
     error: str | None = None

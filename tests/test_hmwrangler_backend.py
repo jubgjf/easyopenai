@@ -65,6 +65,30 @@ def _ok_response(content: str = "mock response", model: str = "deepseek-v3.2") -
     }
 
 
+def _logprobs_for_text(text: str, *, trailing_token: str | None = None) -> dict:
+    entries = [
+        {
+            "token": token,
+            "logprob": -0.1,
+            "bytes": list(token.encode("utf-8")),
+            "top_logprobs": [{"token": token, "logprob": -0.1, "bytes": list(token.encode("utf-8"))}],
+        }
+        for token in text
+    ]
+    if trailing_token is not None:
+        entries.append(
+            {
+                "token": trailing_token,
+                "logprob": -0.2,
+                "bytes": list(trailing_token.encode("utf-8")),
+                "top_logprobs": [
+                    {"token": trailing_token, "logprob": -0.2, "bytes": list(trailing_token.encode("utf-8"))}
+                ],
+            }
+        )
+    return {"content": entries}
+
+
 def _reasoning_response(reasoning: str = "let me think", answer: str = "42") -> dict:
     return {
         "id": "mock-reason",
@@ -325,6 +349,7 @@ class TestProviderWithHmwrangler:
         result = await provider.call(task)
         assert result.ok
         assert result.answer_content == "works"
+        assert result.logprobs is None
         assert result.provider == "yibu"
         assert provider.stats.requests_success == 1
         assert provider.stats.requests_total == 1
@@ -372,6 +397,144 @@ class TestProviderWithHmwrangler:
         assert result.usage.prompt_tokens == 5
         assert result.usage.completion_tokens == 3
         assert result.usage.reasoning_tokens == 0
+
+    async def test_logprobs_exposed_when_requested_and_matching(self):
+        response = _ok_response("答案")
+        response["choices"][0]["logprobs"] = _logprobs_for_text("答案")
+        _install_mock_hmwrangler(aigc_managed_return=response)
+
+        cfg = _hmwrangler_provider_config()
+        provider = Provider(cfg)
+        task = Task(
+            messages=[{"role": "user", "content": "hi"}],
+            model="deepseek-v3.2",
+            extra={"logprobs": True, "top_logprobs": 3},
+        )
+
+        result = await provider.call(task)
+        assert result.ok
+        assert result.answer_content == "答案"
+        assert result.logprobs == response["choices"][0]["logprobs"]
+
+    async def test_logprobs_validation_allows_trailing_stop_token(self):
+        response = _ok_response("ok")
+        response["choices"][0]["logprobs"] = _logprobs_for_text("ok", trailing_token="<|im_end|>")
+        _install_mock_hmwrangler(aigc_managed_return=response)
+
+        cfg = _hmwrangler_provider_config()
+        provider = Provider(cfg)
+        task = Task(
+            messages=[{"role": "user", "content": "hi"}],
+            model="deepseek-v3.2",
+            extra={"logprobs": True},
+        )
+
+        result = await provider.call(task)
+        assert result.logprobs == response["choices"][0]["logprobs"]
+
+    async def test_logprobs_validation_allows_empty_think_wrapper(self):
+        response = _ok_response("ok")
+        response["choices"][0]["logprobs"] = _logprobs_for_text("<think>\n\n</think>\n\nok")
+        _install_mock_hmwrangler(aigc_managed_return=response)
+
+        cfg = _hmwrangler_provider_config()
+        provider = Provider(cfg)
+        task = Task(
+            messages=[{"role": "user", "content": "hi"}],
+            model="deepseek-v3.2",
+            extra={"logprobs": True},
+        )
+
+        result = await provider.call(task)
+        assert result.answer_content == "ok"
+        assert result.logprobs == response["choices"][0]["logprobs"]
+
+    async def test_logprobs_validation_allows_open_think_prefix(self):
+        response = _ok_response("ok")
+        response["choices"][0]["logprobs"] = _logprobs_for_text("<think>ok")
+        _install_mock_hmwrangler(aigc_managed_return=response)
+
+        cfg = _hmwrangler_provider_config()
+        provider = Provider(cfg)
+        task = Task(
+            messages=[{"role": "user", "content": "hi"}],
+            model="deepseek-v3.2",
+            extra={"logprobs": True},
+        )
+
+        result = await provider.call(task)
+        assert result.answer_content == "ok"
+        assert result.logprobs == response["choices"][0]["logprobs"]
+
+    async def test_logprobs_requested_missing_raises_provider_error(self):
+        _install_mock_hmwrangler(aigc_managed_return=_ok_response("ok"))
+
+        cfg = _hmwrangler_provider_config()
+        provider = Provider(cfg)
+        task = Task(
+            messages=[{"role": "user", "content": "hi"}],
+            model="deepseek-v3.2",
+            extra={"logprobs": True},
+        )
+
+        with pytest.raises(ProviderError, match="logprobs=True"):
+            await provider.call(task)
+
+    async def test_logprobs_mismatch_raises_provider_error(self):
+        response = _ok_response("ok")
+        response["choices"][0]["logprobs"] = _logprobs_for_text("no")
+        _install_mock_hmwrangler(aigc_managed_return=response)
+
+        cfg = _hmwrangler_provider_config()
+        provider = Provider(cfg)
+        task = Task(
+            messages=[{"role": "user", "content": "hi"}],
+            model="deepseek-v3.2",
+            extra={"logprobs": True},
+        )
+
+        with pytest.raises(ProviderError, match="does not reconstruct"):
+            await provider.call(task)
+
+    async def test_reasoning_logprobs_can_match_thinking_text(self):
+        response = _reasoning_response("thinking...", "")
+        response["choices"][0]["logprobs"] = _logprobs_for_text("<think>\nthinking...")
+        _install_mock_hmwrangler(aigc_managed_return=response)
+
+        cfg = _hmwrangler_provider_config(
+            models=[ModelConfig(name="deepseek-v3.2", is_reasoning=True)],
+        )
+        provider = Provider(cfg)
+        task = Task(
+            messages=[{"role": "user", "content": "hi"}],
+            model="deepseek-v3.2",
+            extra={"logprobs": True},
+        )
+
+        result = await provider.call(task)
+        assert result.reasoning_content == "thinking..."
+        assert result.answer_content == ""
+        assert result.logprobs == response["choices"][0]["logprobs"]
+
+    async def test_reasoning_logprobs_can_match_think_wrapped_answer(self):
+        response = _reasoning_response("thinking...", "answer")
+        response["choices"][0]["logprobs"] = _logprobs_for_text("<think>\nthinking...\n</think>\n\nanswer")
+        _install_mock_hmwrangler(aigc_managed_return=response)
+
+        cfg = _hmwrangler_provider_config(
+            models=[ModelConfig(name="deepseek-v3.2", is_reasoning=True)],
+        )
+        provider = Provider(cfg)
+        task = Task(
+            messages=[{"role": "user", "content": "hi"}],
+            model="deepseek-v3.2",
+            extra={"logprobs": True},
+        )
+
+        result = await provider.call(task)
+        assert result.reasoning_content == "thinking..."
+        assert result.answer_content == "answer"
+        assert result.logprobs == response["choices"][0]["logprobs"]
 
     async def test_provider_ping(self):
         cfg = _hmwrangler_provider_config()
